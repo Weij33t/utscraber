@@ -36,6 +36,11 @@ jobs:
         env:
           TEKSTOM_API: ${{ vars.TEKSTOM_API }}
         run: npm run build
+      - name: Check public API connection
+        if: github.event_name != 'pull_request'
+        env:
+          TEKSTOM_API: ${{ vars.TEKSTOM_API }}
+        run: node scripts/check-api.mjs
       - uses: actions/upload-pages-artifact@v4
         if: github.event_name != 'pull_request'
         with:

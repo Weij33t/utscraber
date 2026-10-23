@@ -5,7 +5,7 @@ const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&
 const STORE = 'tekstom-library-v1';
 let library = { videos: [], channels: [] };
 let apiOrigin = window.TEKSTOM_API || '';
-try { library = cleanLibrary(JSON.parse(localStorage.getItem(STORE))) || library; apiOrigin = localStorage.getItem('tekstom-api') ?? apiOrigin; } catch { /* private mode or invalid data */ }
+try { library = cleanLibrary(JSON.parse(localStorage.getItem(STORE))) || library; apiOrigin = localStorage.getItem('tekstom-api')?.trim() || apiOrigin; } catch { /* private mode or invalid data */ }
 let activeView = 'home', backView = 'home', activeRequest, requestGeneration = 0;
 let readerData, readerVideo, visibleCards = [], currentChannel, channelPage = null;
 let lastSearch = '', toastTimer;
@@ -193,7 +193,7 @@ $('#settings-open').addEventListener('click',settings);$('#connect-api').addEven
 $('#api-form').addEventListener('submit',async e=>{
   e.preventDefault();let value=$('#api-url').value.trim().replace(/\/+$/,'');
   if(value){try{const url=new URL(value);if(url.username||url.password||url.search||url.hash)throw Error();if(url.protocol!=='https:'&&!(url.protocol==='http:'&&['localhost','127.0.0.1'].includes(url.hostname)))throw Error();}catch{$('#api-status').textContent='Нужен HTTPS-адрес сервера без логина, пароля и параметров.';return;}}
-  cancelRequest();apiOrigin=value;try{localStorage.setItem('tekstom-api',value);}catch{toast('Не удалось запомнить адрес API.');}
+  cancelRequest();apiOrigin=value || window.TEKSTOM_API || '';try{localStorage.setItem('tekstom-api',value);}catch{toast('Не удалось запомнить адрес API.');}
   $('#connection-banner').hidden=!unavailableAPI();$('#api-status').textContent='Проверяем соединение…';
   try{const data=await api('/api/health');if(data.service!=='tekstom')throw new Error('По адресу работает другой сервис.');$('#api-status').textContent='Подключено. Можно искать видео и открывать тексты.';$('#connection-banner').hidden=true;}
   catch(error){$('#api-status').textContent=error.message;$('#connection-banner').hidden=false;}

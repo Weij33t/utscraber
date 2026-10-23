@@ -1,11 +1,14 @@
 services:
   - type: web
-    name: tekstom-api
+    name: tekstom-utscraber-api
     runtime: docker
+    branch: main
     plan: free
+    autoDeployTrigger: commit
+    dockerfilePath: ./Dockerfile
     healthCheckPath: /api/health
     envVars:
       - key: ALLOWED_ORIGINS
-        sync: false
-      - key: YOUTUBE_PROXY
-        sync: false
+        value: https://weij33t.github.io
+      - key: PYTHONUNBUFFERED
+        value: '1'

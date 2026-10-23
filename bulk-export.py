@@ -6,14 +6,14 @@ import threading
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
-from backend.bulk import export
+from backend.bulk import TOPICS, export
 
 
 def main():
     root = tk.Tk()
-    root.title('Текстом · Выгрузить субтитры канала')
-    root.geometry('780x560')
-    root.minsize(620, 450)
+    root.title('Текстом · Выгрузка по темам')
+    root.geometry('780x620')
+    root.minsize(620, 520)
     frame = ttk.Frame(root, padding=22)
     frame.pack(fill='both', expand=True)
     ttk.Label(frame, text='Все субтитры в одну папку', font=('Segoe UI', 18, 'bold')).pack(anchor='w')
@@ -26,7 +26,14 @@ def main():
     row.pack(fill='x')
     ttk.Entry(row, textvariable=folder).pack(side='left', fill='x', expand=True)
     ttk.Button(row, text='Папка…', command=lambda: choose_folder()).pack(side='left', padx=(8, 0))
-    status = tk.StringVar(value='TXT для каждого видео, общий all-transcripts.txt и отчёт о пропусках.')
+    topic_row = ttk.Frame(frame)
+    topic_row.pack(fill='x', pady=(12, 0))
+    ttk.Label(topic_row, text='Тема:').pack(side='left', padx=(0, 8))
+    topic = tk.StringVar(value='Автоматически')
+    topic_box = ttk.Combobox(topic_row, textvariable=topic, values=['Автоматически', *TOPICS, 'Другие темы'])
+    topic_box.pack(side='left', fill='x', expand=True)
+    ttk.Label(frame, text='Автоматически — по ключевым словам названия и текста. Можно вписать свою тему.').pack(anchor='w', pady=(6, 0))
+    status = tk.StringVar(value='Файлы с названием и темой в texts/, общий TXT и отчёт о пропусках.')
     ttk.Label(frame, textvariable=status, wraplength=700).pack(anchor='w', pady=16)
     controls = ttk.Frame(frame)
     controls.pack(fill='x')
@@ -43,6 +50,7 @@ def main():
         nonlocal active
         value = source.get('1.0', 'end').strip()
         destination = folder.get().strip()
+        selected_topic = topic.get().strip()
         if not value or not destination:
             messagebox.showinfo('Текстом', 'Укажи канал или видео и папку для текстов.')
             return
@@ -51,10 +59,12 @@ def main():
         start.configure(state='disabled')
         stop.configure(state='normal')
         source.configure(state='disabled')
+        topic_box.configure(state='disabled')
         status.set('Получаю список видео. Для большого канала выгрузка может занять долгое время…')
         def worker():
             try:
-                result = export(value, destination, events.put, cancel)
+                result = export(value, destination, events.put, cancel,
+                                topic=None if selected_topic == 'Автоматически' else selected_topic)
                 events.put({'done': result})
             except Exception as error:
                 events.put({'error': getattr(error, 'detail', str(error))})
@@ -72,6 +82,7 @@ def main():
                     start.configure(state='normal')
                     stop.configure(state='disabled')
                     source.configure(state='normal')
+                    topic_box.configure(state='normal')
                     if 'error' in event:
                         status.set('Ошибка: ' + str(event['error']))
                     else:

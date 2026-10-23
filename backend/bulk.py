@@ -5,12 +5,55 @@ import re
 import threading
 from pathlib import Path
 
+import httpx
 from fastapi import HTTPException
 from youtube_transcript_api import YouTubeTranscriptApi
 from youtube_transcript_api._errors import IpBlocked, RequestBlocked
 from yt_dlp import YoutubeDL
 
 from backend.app import QuietLogger, TimeoutSession, channel_url, video_id
+
+
+TOPICS = {
+    'CS2 — Разборы': r'разбор|демк|демо|\bdemo\b|анализ матч',
+    'CS2 — Тактика и гранаты': r'тактик|раскид|гранат|смок|\bsmoke|флеш|\bflash|молотов|ретейк|\bretake|стратег|\butility\b',
+    'CS2 — Аим и движение': r'\bаим|\baim|стрельб|микр|движени|\bmovement|стрейф|\bstrafe|трениров',
+    'CS2 — Настройки': r'настройк|конфиг|\bcfg\b|прицел|чувствительност|\bsensitivity|\bсенс|\bfps\b|оптимизац',
+    'CS2 — Киберспорт и новости': r'новост|турнир|\bmajor\b|мейджор|трансфер|обновлен|патч|киберспорт|рейтинг|\bhltv\b',
+    'Программирование': r'\bpython\b|\bjavascript\b|\btypescript\b|программирован|разработк|\bкод\b|\bapi\b',
+}
+
+
+def safe_name(value, limit=90):
+    """Keep readable Unicode names without Windows path syntax or devices."""
+    value = re.sub(r'[<>:"/\\|?*\x00-\x1f]', ' ', str(value))
+    value = re.sub(r'\s+', ' ', value).strip(' .')[:limit].rstrip(' .')
+    value = value or 'Без названия'
+    if re.fullmatch(r'(?i:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\..*)?', value):
+        value = '_' + value
+    return value
+
+
+def detect_topic(title, segments):
+    """Free keyword grouping, not an AI summary; prefer the video's title."""
+    for text in (title, ' '.join(s['text'] for s in segments[:80])[:10000]):
+        scores = {topic: len(set(re.findall(pattern, text.casefold()))) *
+                  (2 if topic == 'CS2 — Разборы' else 0.5 if topic == 'CS2 — Киберспорт и новости' else 1)
+                  for topic, pattern in TOPICS.items()}
+        best = max(scores, key=scores.get)
+        if scores[best]:
+            return best
+    return 'Другие темы'
+
+
+def fetch_title(ident):
+    try:
+        response = httpx.get('https://www.youtube.com/oembed',
+                             params={'url': f'https://www.youtube.com/watch?v={ident}', 'format': 'json'}, timeout=8)
+        response.raise_for_status()
+        return response.json().get('title') or ident
+    except (httpx.HTTPError, ValueError):
+        return ident
 
 
 def iter_videos(source):
@@ -63,7 +106,8 @@ def fetch_native(ident):
 
 
 def text_document(video, data):
-    lines = [video['title'], f"https://www.youtube.com/watch?v={video['id']}",
+    lines = [data.get('title') or video['title'], f"Тема: {data.get('topic', 'Другие темы')}",
+             f"https://www.youtube.com/watch?v={video['id']}",
              f"Язык: {data['language']}", '']
     for segment in data['segments']:
         seconds = max(0, int(segment['start']))
@@ -73,11 +117,11 @@ def text_document(video, data):
     return '\n'.join(lines) + '\n'
 
 
-def export(source, folder, notify=lambda event: None, cancel=None):
+def export(source, folder, notify=lambda event: None, cancel=None, topic=None):
     cancel = cancel or threading.Event()
     folder = Path(folder)
     folder.mkdir(parents=True, exist_ok=True)
-    report = {'saved': 0, 'cached': 0, 'skipped': [], 'cancelled': False, 'blocked': False}
+    report = {'saved': 0, 'cached': 0, 'skipped': [], 'cancelled': False, 'blocked': False, 'files': []}
     try:
         with (folder / 'all-transcripts.txt').open('w', encoding='utf-8') as combined:
             for video in iter_videos(source):
@@ -100,9 +144,24 @@ def export(source, folder, notify=lambda event: None, cancel=None):
                             pass
                     if data is None:
                         data = fetch_native(ident)
-                        cache_file.write_text(json.dumps(data, ensure_ascii=False), encoding='utf-8')
+                    data['title'] = (video['title'] if video['title'] != ident else
+                                     data.get('title') or fetch_title(ident))
+                    data['topic'] = topic.strip() if topic and topic.strip() else detect_topic(data['title'], data['segments'])
+                    data['topicSource'] = 'manual' if topic and topic.strip() else 'keywords'
+                    cache_file.write_text(json.dumps(data, ensure_ascii=False), encoding='utf-8')
                     document = text_document(video, data)
-                    (folder / f'{ident}.txt').write_text(document, encoding='utf-8')
+                    topic_name = safe_name(data['topic'], 40)
+                    destination = folder / 'texts' / topic_name
+                    destination.mkdir(parents=True, exist_ok=True)
+                    # Include the ID so identical titles cannot overwrite one another.
+                    prefix = safe_name(topic_name, 30) + ' — '
+                    suffix = f' [{ident}].txt'
+                    title_limit = min(90, max(12, 240 - len(str(destination.resolve())) - len(prefix) - len(suffix) - 1))
+                    name = prefix + safe_name(data['title'], title_limit) + suffix
+                    path = destination / name
+                    path.write_text(document, encoding='utf-8')
+                    report['files'].append({'id': ident, 'title': data['title'], 'topic': data['topic'],
+                                            'path': path.relative_to(folder).as_posix()})
                     combined.write(document + '\n' + '=' * 72 + '\n\n')
                     combined.flush()
                     report['saved'] += 1

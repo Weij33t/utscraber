@@ -12,7 +12,7 @@ from backend.bulk import TOPICS, export
 
 def attach_clipboard(widget):
     """Support paste buttons, context menus and Ctrl shortcuts in RU layouts."""
-    def paste():
+    def paste(replace_all=False):
         if str(widget.cget('state')) == 'disabled':
             return 'break'
         try:
@@ -21,10 +21,13 @@ def attach_clipboard(widget):
             widget.bell()
             return 'break'
         widget.focus_set()
-        try:
-            widget.delete('sel.first', 'sel.last')
-        except tk.TclError:
-            pass
+        if replace_all:
+            widget.delete('1.0' if isinstance(widget, tk.Text) else 0, 'end')
+        else:
+            try:
+                widget.delete('sel.first', 'sel.last')
+            except tk.TclError:
+                pass
         widget.insert('insert', value)
         if isinstance(widget, tk.Text):
             widget.see('insert')
@@ -57,6 +60,7 @@ def attach_clipboard(widget):
             menu.grab_release()
         return 'break'
     widget.bind('<Button-3>', popup)
+    widget.bind('<<Paste>>', lambda event: paste())
     widget.bind('<Control-KeyPress>', shortcut)
     widget.bind('<Shift-Insert>', lambda event: paste())
     widget._clipboard_menu = menu
@@ -75,14 +79,14 @@ def main(resume=False):
     source_row = ttk.Frame(frame)
     source_row.pack(fill='x')
     ttk.Label(source_row, text='Канал, @имя или ссылки на видео (по одной на строке):').pack(side='left')
-    source = tk.Text(frame, height=7, font=('Segoe UI', 11), wrap='word')
+    source = tk.Text(frame, height=7, font=('Segoe UI', 11), wrap='word', exportselection=False)
     source.pack(fill='both', expand=True, pady=(6, 12))
     paste_source = attach_clipboard(source)
-    ttk.Button(source_row, text='Вставить из буфера', command=paste_source).pack(side='right')
+    ttk.Button(source_row, text='Вставить из буфера', command=lambda: paste_source(replace_all=True)).pack(side='right')
     folder = tk.StringVar(value=str(Path.home() / 'Downloads' / 'Tekstom'))
     row = ttk.Frame(frame)
     row.pack(fill='x')
-    folder_entry = ttk.Entry(row, textvariable=folder)
+    folder_entry = ttk.Entry(row, textvariable=folder, exportselection=False)
     folder_entry.pack(side='left', fill='x', expand=True)
     attach_clipboard(folder_entry)
     ttk.Button(row, text='Папка…', command=lambda: choose_folder()).pack(side='left', padx=(8, 0))
@@ -90,7 +94,8 @@ def main(resume=False):
     topic_row.pack(fill='x', pady=(12, 0))
     ttk.Label(topic_row, text='Тема:').pack(side='left', padx=(0, 8))
     topic = tk.StringVar(value='Автоматически')
-    topic_box = ttk.Combobox(topic_row, textvariable=topic, values=['Автоматически', *TOPICS, 'Другие темы'])
+    topic_box = ttk.Combobox(topic_row, textvariable=topic, exportselection=False,
+                           values=['Автоматически', *TOPICS, 'Другие темы'])
     topic_box.pack(side='left', fill='x', expand=True)
     attach_clipboard(topic_box)
     ttk.Label(frame, text='Автоматически — по ключевым словам названия и текста. Можно вписать свою тему.').pack(anchor='w', pady=(6, 0))
@@ -163,7 +168,9 @@ def main(resume=False):
         else:
             root.destroy()
 
-    def resume_export():
+    def restore_previous():
+        if source.get('1.0', 'end').strip():
+            return True
         try:
             report = json.loads((Path(folder.get()) / 'report.json').read_text(encoding='utf-8'))
             previous_source = report.get('source')
@@ -172,13 +179,19 @@ def main(resume=False):
             source.delete('1.0', 'end')
             source.insert('1.0', previous_source)
             topic.set(report.get('topic') or 'Автоматически')
-            run()
+            return True
         except (OSError, ValueError) as error:
             messagebox.showinfo('Продолжение выгрузки', str(error))
+            return False
+
+    def resume_export():
+        # User input always takes precedence over the channel in an old report.
+        if restore_previous():
+            run()
 
     start = ttk.Button(controls, text='Скачать тексты', command=run)
     start.pack(side='left')
-    resume_button = ttk.Button(controls, text='Продолжить из отчёта', command=resume_export)
+    resume_button = ttk.Button(controls, text='Продолжить', command=resume_export)
     resume_button.pack(side='left', padx=(8, 0))
     stop = ttk.Button(controls, text='Остановить', state='disabled', command=cancel.set)
     stop.pack(side='left', padx=8)
@@ -186,12 +199,13 @@ def main(resume=False):
     root.protocol('WM_DELETE_WINDOW', close)
     root.after(200, poll)
     if resume:
-        root.after(300, resume_export)
+        # Restore synchronously, before editing is possible. Never start requests on launch.
+        restore_previous()
     root.mainloop()
 
 
 if __name__ == '__main__':
     import argparse
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--resume', action='store_true')
+    parser.add_argument('--resume', action='store_true', help='Restore the previous channel without starting a download.')
     main(resume=parser.parse_args().resume)

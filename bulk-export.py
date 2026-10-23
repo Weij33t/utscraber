@@ -70,8 +70,8 @@ def attach_clipboard(widget):
 def main(resume=False):
     root = tk.Tk()
     root.title('Текстом · Выгрузка по темам')
-    root.geometry('780x620')
-    root.minsize(620, 520)
+    root.geometry('820x690')
+    root.minsize(700, 600)
     frame = ttk.Frame(root, padding=22)
     frame.pack(fill='both', expand=True)
     ttk.Label(frame, text='Все субтитры в одну папку', font=('Segoe UI', 18, 'bold')).pack(anchor='w')
@@ -99,6 +99,14 @@ def main(resume=False):
     topic_box.pack(side='left', fill='x', expand=True)
     attach_clipboard(topic_box)
     ttk.Label(frame, text='Автоматически — по ключевым словам названия и текста. Можно вписать свою тему.').pack(anchor='w', pady=(6, 0))
+    method_row = ttk.Frame(frame)
+    method_row.pack(fill='x', pady=(12, 0))
+    ttk.Label(method_row, text='Получать текст:').pack(side='left', padx=(0, 8))
+    method = tk.StringVar(value='Через браузер')
+    method_box = ttk.Combobox(method_row, textvariable=method, state='readonly',
+                             values=['Через браузер', 'Прямым запросом'])
+    method_box.pack(side='left', fill='x', expand=True)
+    ttk.Label(frame, text='Браузер откроет описание и «Показать текст видео». Не закрывай его во время выгрузки.').pack(anchor='w', pady=(6, 0))
     status = tk.StringVar(value='Файлы с названием и темой в texts/, общий TXT и отчёт о пропусках.')
     ttk.Label(frame, textvariable=status, wraplength=700).pack(anchor='w', pady=16)
     controls = ttk.Frame(frame)
@@ -117,6 +125,7 @@ def main(resume=False):
         value = source.get('1.0', 'end').strip()
         destination = folder.get().strip()
         selected_topic = topic.get().strip()
+        selected_method = 'browser' if method.get() == 'Через браузер' else 'direct'
         if not value or not destination:
             messagebox.showinfo('Текстом', 'Укажи канал или видео и папку для текстов.')
             return
@@ -127,11 +136,13 @@ def main(resume=False):
         stop.configure(state='normal')
         source.configure(state='disabled')
         topic_box.configure(state='disabled')
+        method_box.configure(state='disabled')
         status.set('Получаю список видео. Для большого канала выгрузка может занять долгое время…')
         def worker():
             try:
                 result = export(value, destination, events.put, cancel,
-                                topic=None if selected_topic == 'Автоматически' else selected_topic)
+                                topic=None if selected_topic == 'Автоматически' else selected_topic,
+                                method=selected_method)
                 events.put({'done': result})
             except Exception as error:
                 events.put({'error': getattr(error, 'detail', str(error))})
@@ -151,6 +162,7 @@ def main(resume=False):
                     stop.configure(state='disabled')
                     source.configure(state='normal')
                     topic_box.configure(state='normal')
+                    method_box.configure(state='readonly')
                     if 'error' in event:
                         status.set('Ошибка: ' + str(event['error']))
                     else:

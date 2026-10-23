@@ -3,6 +3,7 @@ import html
 import json
 import re
 import threading
+from contextlib import ExitStack
 from pathlib import Path
 
 import httpx
@@ -12,6 +13,7 @@ from youtube_transcript_api._errors import IpBlocked, RequestBlocked
 from yt_dlp import YoutubeDL
 
 from backend.app import QuietLogger, TimeoutSession, channel_url, video_id
+from backend.browser_transcript import BrowserTranscriptReader, BrowserSetupError, BrowserBlockedError, BrowserStopped
 
 
 TOPICS = {
@@ -108,7 +110,7 @@ def fetch_native(ident):
 def text_document(video, data):
     lines = [data.get('title') or video['title'], f"Тема: {data.get('topic', 'Другие темы')}",
              f"https://www.youtube.com/watch?v={video['id']}",
-             f"Язык: {data['language']}", '']
+             f"Язык: {'не указан YouTube' if data['language'] == 'und' else data['language']}", '']
     for segment in data['segments']:
         seconds = max(0, int(segment['start']))
         hours, remainder = divmod(seconds, 3600)
@@ -117,12 +119,14 @@ def text_document(video, data):
     return '\n'.join(lines) + '\n'
 
 
-def export(source, folder, notify=lambda event: None, cancel=None, topic=None, pause_seconds=8):
+def export(source, folder, notify=lambda event: None, cancel=None, topic=None, pause_seconds=8, method='direct'):
+    if method not in {'direct', 'browser'}:
+        raise ValueError('Неизвестный способ получения субтитров.')
     cancel = cancel or threading.Event()
     folder = Path(folder)
     folder.mkdir(parents=True, exist_ok=True)
     report = {'saved': 0, 'cached': 0, 'skipped': [], 'cancelled': False, 'blocked': False, 'files': [],
-              'source': source, 'topic': topic, 'pauseSeconds': pause_seconds, 'running': True}
+              'source': source, 'topic': topic, 'pauseSeconds': pause_seconds, 'running': True, 'method': method}
     def checkpoint():
         temporary = folder / '.report.json.tmp'
         temporary.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding='utf-8')
@@ -130,7 +134,8 @@ def export(source, folder, notify=lambda event: None, cancel=None, topic=None, p
     checkpoint()
     combined_temporary = folder / '.all-transcripts.txt.tmp'
     try:
-        with combined_temporary.open('w', encoding='utf-8') as combined:
+        with ExitStack() as resources, combined_temporary.open('w', encoding='utf-8') as combined:
+            browser = None
             for video in iter_videos(source):
                 if cancel.is_set():
                     report['cancelled'] = True
@@ -150,7 +155,13 @@ def export(source, folder, notify=lambda event: None, cancel=None, topic=None, p
                         except (ValueError, OSError):
                             pass
                     if data is None:
-                        data = fetch_native(ident)
+                        if method == 'browser':
+                            if browser is None:
+                                browser = resources.enter_context(BrowserTranscriptReader(cancel=cancel,
+                                    notify=lambda message: notify({'message': message, **report})))
+                            data = browser.fetch(ident)
+                        else:
+                            data = fetch_native(ident)
                     data['title'] = (video['title'] if video['title'] != ident else
                                      data.get('title') or fetch_title(ident))
                     data['topic'] = topic.strip() if topic and topic.strip() else detect_topic(data['title'], data['segments'])
@@ -177,6 +188,15 @@ def export(source, folder, notify=lambda event: None, cancel=None, topic=None, p
                     report['blocked'] = True
                     report['skipped'].append({'id': ident, 'reason': 'YouTube заблокировал запросы с текущего IP. Выгрузка остановлена.'})
                     break
+                except BrowserBlockedError as error:
+                    report['blocked'] = True
+                    report['skipped'].append({'id': ident, 'reason': str(error)})
+                    break
+                except BrowserStopped:
+                    report['cancelled'] = True
+                    break
+                except BrowserSetupError:
+                    raise
                 except Exception as error:
                     report['skipped'].append({'id': ident, 'reason': str(error)[:700]})
                 notify({'message': f'Сохранено: {report["saved"]}; пропущено: {len(report["skipped"])}', **report})

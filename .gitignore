@@ -6,3 +6,4 @@ output/
 *.log
 .tools/
 dist/
+.playwright-cli/

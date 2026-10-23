@@ -48,6 +48,8 @@ def test_bulk_export_reuses_cache_without_provider_calls(monkeypatch, tmp_path):
 
 
 def test_bulk_block_stops_remaining_videos_and_writes_report(monkeypatch, tmp_path):
+    combined = tmp_path / 'all-transcripts.txt'
+    combined.write_text('Previously exported text', encoding='utf-8')
     fetch = Mock(side_effect=IpBlocked('dQw4w9WgXcQ'))
     monkeypatch.setattr(bulk, 'fetch_native', fetch)
     report = bulk.export('dQw4w9WgXcQ\ngkh07IUN7E0', tmp_path)
@@ -55,6 +57,7 @@ def test_bulk_block_stops_remaining_videos_and_writes_report(monkeypatch, tmp_pa
     assert len(report['skipped']) == 1
     fetch.assert_called_once()
     assert json.loads((tmp_path / 'report.json').read_text(encoding='utf-8')) == report
+    assert combined.read_text(encoding='utf-8') == 'Previously exported text'
 
 
 def test_bulk_cancel_preserves_completed_files(monkeypatch, tmp_path):

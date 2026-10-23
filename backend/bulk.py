@@ -128,8 +128,9 @@ def export(source, folder, notify=lambda event: None, cancel=None, topic=None, p
         temporary.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding='utf-8')
         temporary.replace(folder / 'report.json')
     checkpoint()
+    combined_temporary = folder / '.all-transcripts.txt.tmp'
     try:
-        with (folder / 'all-transcripts.txt').open('w', encoding='utf-8') as combined:
+        with combined_temporary.open('w', encoding='utf-8') as combined:
             for video in iter_videos(source):
                 if cancel.is_set():
                     report['cancelled'] = True
@@ -185,6 +186,10 @@ def export(source, folder, notify=lambda event: None, cancel=None, topic=None, p
                     report['cancelled'] = True
                     break
     finally:
+        if report['saved']:
+            combined_temporary.replace(folder / 'all-transcripts.txt')
+        elif combined_temporary.exists():
+            combined_temporary.unlink()
         report['running'] = False
         checkpoint()
     return report

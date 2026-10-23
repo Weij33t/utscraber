@@ -135,7 +135,8 @@ def video_card(entry):
 
 @app.get("/api/health")
 def health():
-    return {"ok": True, "service": "tekstom", "version": "1.0.0"}
+    return {"ok": True, "service": "tekstom", "version": "1.0.0",
+            "transcriptProvider": "supadata" if os.getenv("SUPADATA_API_KEY", "").strip() else "youtube"}
 
 
 @app.get("/api/search")
@@ -174,10 +175,81 @@ class TimeoutSession(Session):
         return super().request(method, url, **kwargs)
 
 
+def supadata_transcript(ident, lang, key):
+    """Fetch existing captions only; never spend credits on AI transcription."""
+    params = {"url": f"https://www.youtube.com/watch?v={ident}", "mode": "native", "text": "false"}
+    if lang:
+        params["lang"] = lang
+    def read(response):
+        if response.status_code in {401, 403}:
+            raise HTTPException(503, "Сервис субтитров не подключён: проверьте SUPADATA_API_KEY в настройках Render.")
+        if response.status_code in {402, 429}:
+            raise HTTPException(429, "Лимит сервиса субтитров исчерпан или запросы идут слишком часто. Попробуйте позже.")
+        if response.status_code in {206, 404}:
+            raise HTTPException(404, "У видео нет доступных субтитров. Распознавание аудио не включено.")
+        response.raise_for_status()
+        return response.json()
+    try:
+        with httpx.Client(headers={"x-api-key": key}, timeout=15) as client:
+            response = client.get("https://api.supadata.ai/v1/transcript", params=params)
+            data = read(response)
+            if response.status_code == 202:
+                job = data.get("jobId", "")
+                if not re.fullmatch(r"[\w-]{1,100}", job):
+                    raise ValueError("Invalid transcript job")
+                deadline = time.monotonic() + 45
+                while time.monotonic() < deadline:
+                    time.sleep(2)
+                    data = read(client.get(f"https://api.supadata.ai/v1/transcript/{job}"))
+                    if data.get("status") == "completed":
+                        data = data.get("result", data)
+                        break
+                    if data.get("status") == "failed":
+                        raise HTTPException(502, "Сервис не смог получить субтитры этого видео.")
+                else:
+                    raise HTTPException(504, "Сервис субтитров отвечает слишком долго. Попробуйте позже.")
+            content = data.get("content")
+            if not isinstance(content, list):
+                raise ValueError("Expected timestamped transcript")
+            segments = [{"start": float(s["offset"]) / 1000,
+                         "duration": float(s.get("duration", 0)) / 1000,
+                         "text": html.unescape(s["text"])} for s in content]
+            if not segments:
+                raise HTTPException(404, "YouTube вернул пустые субтитры.")
+            language = data["lang"]
+            languages = list(dict.fromkeys([language, *data.get("availableLangs", [])]))
+            return {"language": language, "generated": None,
+                    "languages": [{"code": code, "name": code, "generated": None} for code in languages],
+                    "segments": segments}
+    except HTTPException:
+        raise
+    except (httpx.HTTPError, ValueError, KeyError, TypeError) as exc:
+        raise HTTPException(502, "Не удалось получить субтитры от внешнего сервиса. Попробуйте позже.") from exc
+
+
+def transcript_response(ident, captions):
+    title, author = "Видео YouTube", "Канал YouTube"
+    try:
+        response = httpx.get("https://www.youtube.com/oembed", params={"url": f"https://www.youtube.com/watch?v={ident}", "format": "json"}, timeout=8)
+        response.raise_for_status()
+        meta = response.json()
+        title, author = meta.get("title", title), meta.get("author_name", author)
+        author_url = meta.get("author_url")
+    except (httpx.HTTPError, ValueError):
+        author_url = None
+    return {"video": {"id": ident, "title": title, "channel": author, "channelUrl": author_url,
+                      "thumbnail": f"https://i.ytimg.com/vi/{ident}/hqdefault.jpg"}, **captions}
+
+
 @app.get("/api/transcript")
 def transcript(url: str = Query(max_length=500), lang: str | None = Query(None, pattern=r"^[a-zA-Z0-9-]{1,20}$")):
     ident = video_id(url)
     def load():
+        key = os.getenv("SUPADATA_API_KEY", "").strip()
+        if key:
+            with upstream_slot():
+                captions = supadata_transcript(ident, lang, key)
+            return transcript_response(ident, captions)
         with upstream_slot(), TimeoutSession() as session:
             proxy = os.getenv("YOUTUBE_PROXY")
             api = YouTubeTranscriptApi(http_client=session, proxy_config=GenericProxyConfig(https_url=proxy, http_url=proxy) if proxy else None)
@@ -209,20 +281,9 @@ def transcript(url: str = Query(max_length=500), lang: str | None = Query(None, 
                 raise
             except Exception as exc:
                 raise HTTPException(502, "Не удалось получить субтитры от YouTube. Попробуйте позже.") from exc
-        title, author = "Видео YouTube", "Канал YouTube"
-        try:
-            response = httpx.get("https://www.youtube.com/oembed", params={"url": f"https://www.youtube.com/watch?v={ident}", "format": "json"}, timeout=8)
-            response.raise_for_status()
-            meta = response.json()
-            title, author = meta.get("title", title), meta.get("author_name", author)
-            author_url = meta.get("author_url")
-        except (httpx.HTTPError, ValueError):
-            author_url = None
-        return {"video": {"id": ident, "title": title, "channel": author, "channelUrl": author_url,
-                          "thumbnail": f"https://i.ytimg.com/vi/{ident}/hqdefault.jpg"},
-                "language": track.language_code, "generated": track.is_generated,
+        return transcript_response(ident, {"language": track.language_code, "generated": track.is_generated,
                 "languages": [{"code": t.language_code, "name": t.language, "generated": t.is_generated} for t in tracks],
-                "segments": segments}
+                "segments": segments})
     return cached(("transcript", ident, lang), load, ttl=3600)
 
 

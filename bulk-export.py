@@ -10,6 +10,59 @@ from tkinter import filedialog, messagebox, ttk
 from backend.bulk import TOPICS, export
 
 
+def attach_clipboard(widget):
+    """Support paste buttons, context menus and Ctrl shortcuts in RU layouts."""
+    def paste():
+        if str(widget.cget('state')) == 'disabled':
+            return 'break'
+        try:
+            value = widget.clipboard_get().replace('\r\n', '\n')
+        except tk.TclError:
+            widget.bell()
+            return 'break'
+        widget.focus_set()
+        try:
+            widget.delete('sel.first', 'sel.last')
+        except tk.TclError:
+            pass
+        widget.insert('insert', value)
+        if isinstance(widget, tk.Text):
+            widget.see('insert')
+        return 'break'
+
+    def virtual(name):
+        widget.focus_set()
+        widget.event_generate(name)
+        return 'break'
+
+    def shortcut(event):
+        # Windows virtual key codes are independent of the active language.
+        if event.keycode == 86:
+            return paste()
+        action = {65: '<<SelectAll>>', 67: '<<Copy>>', 88: '<<Cut>>'}.get(event.keycode)
+        if action:
+            return virtual(action)
+
+    menu = tk.Menu(widget, tearoff=False)
+    for label, action in [('Вырезать', '<<Cut>>'), ('Копировать', '<<Copy>>')]:
+        menu.add_command(label=label, command=lambda name=action: virtual(name))
+    menu.add_command(label='Вставить', command=paste)
+    menu.add_separator()
+    menu.add_command(label='Выделить всё', command=lambda: virtual('<<SelectAll>>'))
+    def popup(event):
+        widget.focus_set()
+        try:
+            menu.tk_popup(event.x_root, event.y_root)
+        finally:
+            menu.grab_release()
+        return 'break'
+    widget.bind('<Button-3>', popup)
+    widget.bind('<Control-KeyPress>', shortcut)
+    widget.bind('<Shift-Insert>', lambda event: paste())
+    widget._clipboard_menu = menu
+    return paste
+
+
 def main(resume=False):
     root = tk.Tk()
     root.title('Текстом · Выгрузка по темам')
@@ -19,13 +72,19 @@ def main(resume=False):
     frame.pack(fill='both', expand=True)
     ttk.Label(frame, text='Все субтитры в одну папку', font=('Segoe UI', 18, 'bold')).pack(anchor='w')
     ttk.Label(frame, text='Работает напрямую с YouTube на этом ПК. Supadata и кредиты не используются.').pack(anchor='w', pady=(8, 18))
-    ttk.Label(frame, text='Ссылка на канал, @имя или ссылки на видео (по одной на строке):').pack(anchor='w')
+    source_row = ttk.Frame(frame)
+    source_row.pack(fill='x')
+    ttk.Label(source_row, text='Канал, @имя или ссылки на видео (по одной на строке):').pack(side='left')
     source = tk.Text(frame, height=7, font=('Segoe UI', 11), wrap='word')
     source.pack(fill='both', expand=True, pady=(6, 12))
+    paste_source = attach_clipboard(source)
+    ttk.Button(source_row, text='Вставить из буфера', command=paste_source).pack(side='right')
     folder = tk.StringVar(value=str(Path.home() / 'Downloads' / 'Tekstom'))
     row = ttk.Frame(frame)
     row.pack(fill='x')
-    ttk.Entry(row, textvariable=folder).pack(side='left', fill='x', expand=True)
+    folder_entry = ttk.Entry(row, textvariable=folder)
+    folder_entry.pack(side='left', fill='x', expand=True)
+    attach_clipboard(folder_entry)
     ttk.Button(row, text='Папка…', command=lambda: choose_folder()).pack(side='left', padx=(8, 0))
     topic_row = ttk.Frame(frame)
     topic_row.pack(fill='x', pady=(12, 0))
@@ -33,6 +92,7 @@ def main(resume=False):
     topic = tk.StringVar(value='Автоматически')
     topic_box = ttk.Combobox(topic_row, textvariable=topic, values=['Автоматически', *TOPICS, 'Другие темы'])
     topic_box.pack(side='left', fill='x', expand=True)
+    attach_clipboard(topic_box)
     ttk.Label(frame, text='Автоматически — по ключевым словам названия и текста. Можно вписать свою тему.').pack(anchor='w', pady=(6, 0))
     status = tk.StringVar(value='Файлы с названием и темой в texts/, общий TXT и отчёт о пропусках.')
     ttk.Label(frame, textvariable=status, wraplength=700).pack(anchor='w', pady=16)

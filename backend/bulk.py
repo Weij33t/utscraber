@@ -117,11 +117,17 @@ def text_document(video, data):
     return '\n'.join(lines) + '\n'
 
 
-def export(source, folder, notify=lambda event: None, cancel=None, topic=None):
+def export(source, folder, notify=lambda event: None, cancel=None, topic=None, pause_seconds=8):
     cancel = cancel or threading.Event()
     folder = Path(folder)
     folder.mkdir(parents=True, exist_ok=True)
-    report = {'saved': 0, 'cached': 0, 'skipped': [], 'cancelled': False, 'blocked': False, 'files': []}
+    report = {'saved': 0, 'cached': 0, 'skipped': [], 'cancelled': False, 'blocked': False, 'files': [],
+              'source': source, 'topic': topic, 'pauseSeconds': pause_seconds, 'running': True}
+    def checkpoint():
+        temporary = folder / '.report.json.tmp'
+        temporary.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding='utf-8')
+        temporary.replace(folder / 'report.json')
+    checkpoint()
     try:
         with (folder / 'all-transcripts.txt').open('w', encoding='utf-8') as combined:
             for video in iter_videos(source):
@@ -173,9 +179,12 @@ def export(source, folder, notify=lambda event: None, cancel=None, topic=None):
                 except Exception as error:
                     report['skipped'].append({'id': ident, 'reason': str(error)[:700]})
                 notify({'message': f'Сохранено: {report["saved"]}; пропущено: {len(report["skipped"])}', **report})
-                if not cached and cancel.wait(1.5):
+                report['lastVideoId'] = ident
+                checkpoint()
+                if not cached and cancel.wait(pause_seconds):
                     report['cancelled'] = True
                     break
     finally:
-        (folder / 'report.json').write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding='utf-8')
+        report['running'] = False
+        checkpoint()
     return report

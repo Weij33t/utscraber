@@ -1,5 +1,6 @@
 """Double-click bulk-export.cmd to open this local desktop exporter."""
 import os
+import json
 from pathlib import Path
 import queue
 import threading
@@ -9,7 +10,7 @@ from tkinter import filedialog, messagebox, ttk
 from backend.bulk import TOPICS, export
 
 
-def main():
+def main(resume=False):
     root = tk.Tk()
     root.title('Текстом · Выгрузка по темам')
     root.geometry('780x620')
@@ -57,6 +58,7 @@ def main():
         active = True
         cancel.clear()
         start.configure(state='disabled')
+        resume_button.configure(state='disabled')
         stop.configure(state='normal')
         source.configure(state='disabled')
         topic_box.configure(state='disabled')
@@ -80,6 +82,7 @@ def main():
                 else:
                     active = False
                     start.configure(state='normal')
+                    resume_button.configure(state='normal')
                     stop.configure(state='disabled')
                     source.configure(state='normal')
                     topic_box.configure(state='normal')
@@ -100,15 +103,35 @@ def main():
         else:
             root.destroy()
 
+    def resume_export():
+        try:
+            report = json.loads((Path(folder.get()) / 'report.json').read_text(encoding='utf-8'))
+            previous_source = report.get('source')
+            if not previous_source:
+                raise ValueError('В старом отчёте нет ссылки на канал. Вставь её выше и нажми «Скачать тексты»: сохранённые видео будут взяты из кеша.')
+            source.delete('1.0', 'end')
+            source.insert('1.0', previous_source)
+            topic.set(report.get('topic') or 'Автоматически')
+            run()
+        except (OSError, ValueError) as error:
+            messagebox.showinfo('Продолжение выгрузки', str(error))
+
     start = ttk.Button(controls, text='Скачать тексты', command=run)
     start.pack(side='left')
+    resume_button = ttk.Button(controls, text='Продолжить из отчёта', command=resume_export)
+    resume_button.pack(side='left', padx=(8, 0))
     stop = ttk.Button(controls, text='Остановить', state='disabled', command=cancel.set)
     stop.pack(side='left', padx=8)
     ttk.Button(controls, text='Открыть папку', command=lambda: os.startfile(folder.get()) if Path(folder.get()).is_dir() else None).pack(side='right')
     root.protocol('WM_DELETE_WINDOW', close)
     root.after(200, poll)
+    if resume:
+        root.after(300, resume_export)
     root.mainloop()
 
 
 if __name__ == '__main__':
-    main()
+    import argparse
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--resume', action='store_true')
+    main(resume=parser.parse_args().resume)

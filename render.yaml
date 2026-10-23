@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: tekstom-api
+    runtime: docker
+    plan: free
+    healthCheckPath: /api/health
+    envVars:
+      - key: ALLOWED_ORIGINS
+        sync: false
+      - key: YOUTUBE_PROXY
+        sync: false

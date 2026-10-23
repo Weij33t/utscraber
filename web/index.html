@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#101312">
+  <meta name="description" content="Читайте YouTube: субтитры с тайм-кодами, поиск видео и своя библиотека.">
+  <title>Текстом — YouTube, который можно читать</title>
+  <link rel="icon" href="./icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="./styles.css">
+  <script src="./config.js" defer></script>
+  <script src="./app.js" type="module"></script>
+</head>
+<body>
+  <aside class="sidebar">
+    <a class="brand" href="#home" aria-label="Текстом, главная"><span class="brand-icon">≋</span>текстом<span class="brand-dot">.</span></a>
+    <div class="sidebar-label">ВАШ YOUTUBE</div>
+    <nav aria-label="Основная навигация">
+      <button data-view="home" class="nav-item active"><span>⌕</span> Обзор</button>
+      <button data-view="saved" class="nav-item"><span>▧</span> Сохранённое <small id="saved-count">0</small></button>
+      <button data-view="channels" class="nav-item"><span>◉</span> Мои каналы <small id="channel-count">0</small></button>
+    </nav>
+    <div class="sidebar-note"><span class="tiny-dot"></span> Меньше смотреть.<br>Больше понимать.</div>
+    <button id="settings-open" class="settings-link">⚙ <span>Настройки и данные</span></button>
+  </aside>
+  <main>
+    <header class="topbar"><span id="breadcrumb">Личное пространство / <b>Обзор</b></span><span class="private-label"><i></i> Без аккаунта</span></header>
+    <div id="connection-banner" class="connection-banner" hidden>Для поиска и субтитров подключите API. <button id="connect-api">Настроить подключение ↗</button></div>
+    <section id="home-view" class="view">
+      <div class="intro"><div class="eyebrow"><span></span> ВИДЕО → ТЕКСТ</div><h1>Смотри меньше.<br><em>Читай по делу.</em></h1><p>Всё, что сказано в видео — в одном тексте.<br class="desktop-break"> С тайм-кодами и без лишних перемоток.</p></div>
+      <form id="search-form" class="search-box"><span class="search-icon" aria-hidden="true">⌕</span><label class="sr-only" for="query">Ссылка на видео, канал или поисковый запрос</label><input id="query" type="text" placeholder="Ссылка на YouTube или что ищем?" required maxlength="500" autocomplete="off"><button type="submit" id="search-submit">Найти <span>↗</span></button></form>
+      <div class="search-hint"><span>↵ Enter, чтобы открыть</span><span>Видео · Shorts · Каналы</span></div>
+      <section id="discover"><div class="section-heading"><h2>С чего начнём?</h2><span>НАПРАВЛЕНИЕ, А НЕ АЛГОРИТМ</span></div><div class="topic-grid">
+        <button class="topic-card mint" data-featured-channel="UCKaEoPORRt-JfrbWaU76GXQ"><span class="topic-symbol">↗</span><span class="topic-caption">ТВОЙ ОРИЕНТИР</span><strong>Jerrycs2</strong><span>Разборы и аналитика CS2 <b>↗</b></span></button>
+        <button class="topic-card" data-search="разбор CS2 на русском"><span class="topic-symbol">⌘</span><span class="topic-caption">ПО ТЕМЕ</span><strong>CS2 на русском</strong><span>Найти видео и новые каналы <b>↗</b></span></button>
+        <button class="topic-card" id="paste-focus"><span class="topic-symbol">≋</span><span class="topic-caption">СРАЗУ К СУТИ</span><strong>Есть ссылка?</strong><span>Вставь её в строку выше <b>↑</b></span></button>
+      </div><div class="how-it-works"><span class="step-number">01</span><span>Найди видео</span><i>→</i><span class="step-number">02</span><span>Открой текст</span><i>→</i><span class="step-number">03</span><span>Забери главное</span></div></section>
+      <section id="results-section" hidden><div class="section-heading"><h2 id="results-title">Результаты</h2><button id="results-clear" class="text-button">Сбросить ×</button></div><div id="results"></div><button id="load-more" class="secondary more" hidden>Загрузить ещё</button></section>
+    </section>
+    <section id="saved-view" class="view" hidden><div class="page-heading"><div class="eyebrow">ЛИЧНАЯ БИБЛИОТЕКА</div><h1>На потом<span class="accent">.</span></h1><p>Видео и загруженные тексты, которые ты сохранил на этом устройстве.</p></div><div id="saved-list"></div></section>
+    <section id="channels-view" class="view" hidden><div class="page-heading"><div class="eyebrow">СВОЯ ЛЕНТА</div><h1>Мои каналы<span class="accent">.</span></h1><p>Выбирай, кого читать. Открой канал, чтобы загрузить его видео.</p></div><form id="channel-form" class="search-box compact"><label class="sr-only" for="channel-input">Ссылка или имя канала</label><input id="channel-input" placeholder="@имя или ссылка на канал" required maxlength="300"><button>Добавить ↗</button></form><div id="channels-list"></div></section>
+    <section id="reader-view" class="view" hidden><button id="reader-back" class="text-button">← Назад к видео</button><div id="reader-content"></div></section>
+    <footer><span>текстом<span class="accent">.</span> <span class="footer-note">Оставь время на что-то ещё.</span></span><span>Субтитры предоставляются YouTube</span></footer>
+  </main>
+  <dialog id="settings"><form method="dialog" class="dialog-top"><h2>Настройки</h2><button class="icon-button" aria-label="Закрыть">×</button></form><p>Интерфейс работает на GitHub Pages. Для обращений к YouTube нужен отдельный API.</p><form id="api-form"><label for="api-url">Адрес API</label><input id="api-url" type="url" placeholder="https://your-api.onrender.com"><p class="field-hint">Локально оставь пустым. Для опубликованного сайта нужен HTTPS. Адрес сохраняется в этом браузере.</p><button class="primary" type="submit">Сохранить и проверить</button></form><p id="api-status" role="status"></p><hr><h3>Твоя библиотека</h3><p>Закладки, каналы и тексты хранятся в браузере. Перенеси их на телефон через файл.</p><div class="button-row"><button id="export-data" class="secondary">Экспорт JSON ↓</button><label class="secondary file-label">Импорт JSON ↑<input id="import-data" type="file" accept="application/json" hidden></label></div></dialog>
+  <div id="toast" role="status" hidden></div>
+</body>
+</html>
